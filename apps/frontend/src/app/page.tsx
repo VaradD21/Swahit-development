@@ -23,30 +23,6 @@ import {
 export default function LandingPage() {
   return (
     <div className="flex flex-col min-h-screen bg-[#fafafa] selection:bg-teal-100 selection:text-teal-900">
-      {/* Navigation */}
-      <header className="px-6 lg:px-12 h-20 flex items-center justify-between border-b border-teal-100/50 bg-white/80 backdrop-blur-md sticky top-0 z-50">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 flex items-center justify-center">
-            <Image src={logo} alt="Swahit Logo" width={40} height={40} className="object-contain" />
-          </div>
-          <span className="font-bold text-2xl tracking-tight text-teal-900">Swahit</span>
-        </div>
-        <nav className="hidden md:flex gap-8 text-sm font-medium text-slate-600">
-          <Link href="#about" className="hover:text-teal-600 transition-colors">About</Link>
-          <Link href="#features" className="hover:text-teal-600 transition-colors">Features</Link>
-          <Link href="#how-it-works" className="hover:text-teal-600 transition-colors">How it works</Link>
-          <Link href="#support" className="hover:text-teal-600 transition-colors">Support</Link>
-        </nav>
-        <div className="flex items-center gap-4">
-          <Link href="/login">
-            <Button variant="ghost" className="font-medium text-teal-800 hover:text-teal-900 hover:bg-teal-50 hidden sm:flex">Log In</Button>
-          </Link>
-          <Link href="/login">
-            <Button className="font-medium px-6 bg-teal-600 hover:bg-teal-700 text-white shadow-sm shadow-teal-600/20">Get Started</Button>
-          </Link>
-        </div>
-      </header>
-
       <main className="flex-1">
         {/* 1. HERO SECTION */}
         <section className="relative pt-24 pb-32 px-6 lg:px-12 text-center overflow-hidden">

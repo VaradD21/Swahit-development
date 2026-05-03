@@ -11,7 +11,7 @@ export class QuestionnaireService {
         userId,
         score,
         feedback,
-        answers, // JSON
+        answers: JSON.stringify(answers), // Store JSON as string for SQLite
       },
     });
   }

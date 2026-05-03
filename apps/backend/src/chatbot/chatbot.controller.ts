@@ -14,8 +14,11 @@ export class ChatbotController {
 
   @UseGuards(JwtAuthGuard)
   @Post('message')
-  async sendMessage(@Request() req: any, @Body() body: { sessionId?: string, content: string }) {
-    return this.chatbotService.sendMessage(req.user.userId, body.sessionId || null, body.content);
+  async sendMessage(@Request() req: any, @Body() body: { sessionId: string | null; content: string; mode?: string }) {
+    if (!body.content || body.content.trim() === '') {
+      throw new HttpException('Message content cannot be empty', HttpStatus.BAD_REQUEST);
+    }
+    return this.chatbotService.sendMessage(req.user.userId, body.sessionId, body.content, body.mode);
   }
 
   @UseGuards(JwtAuthGuard)

@@ -1,6 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { GeminiProvider } from './providers/gemini.provider';
+import { EntitlementResolverService } from '../common/entitlements/entitlement-resolver.service';
+import { CommunicationService } from '../communication/communication.service';
+import { HttpException, HttpStatus } from '@nestjs/common';
 
 const SYSTEM_PROMPT = `You are Swahit AI Companion, a warm, calm, emotionally intelligent, and deeply empathetic wellness assistant.
 Your tone is soft, thoughtful, and non-judgmental. You provide concise but caring responses, prioritizing the user's emotional safety.
@@ -28,43 +31,47 @@ const SYNC_PROMPT = `You are an AI assistant summarizing a therapy-style convers
 Please read the following conversation log and provide a concise summary of the key emotional themes, new stressors discussed, and any positive habits mentioned. 
 Return ONLY the summary text, nothing else. Keep it under 4 sentences.`;
 
+const MODE_PROMPTS: Record<string, string> = {
+  VENT: `You are Swahit AI Companion in VENT mode. Your job is to listen, validate emotions, and offer empathy. Do NOT give advice or try to fix the problem unless explicitly asked. Focus on making the user feel heard and understood.`,
+  CBT: `You are Swahit AI Companion in CBT (Cognitive Behavioral Therapy) mode. Help the user identify negative thought patterns or cognitive distortions. Gently guide them to reframe their thoughts using structured, logical steps. Keep it conversational.`,
+  MOTIVATION: `You are Swahit AI Companion in MOTIVATION mode. Your tone is uplifting, positive, and action-oriented. Provide short, actionable suggestions to help the user build momentum and achieve their goals.`,
+  CRISIS: `You are Swahit AI Companion in CRISIS mode. The user is in distress. Your tone is extremely gentle, grounding, and supportive. Prioritize their safety. Remind them they are not alone and encourage them to reach out to professional emergency services or a crisis hotline immediately.`,
+  DEFAULT: SYSTEM_PROMPT
+};
+
 @Injectable()
 export class ChatbotService {
   private readonly logger = new Logger(ChatbotService.name);
 
   constructor(
     private prisma: PrismaService,
-    private aiProvider: GeminiProvider // Using Gemini Flash as standard
+    private aiProvider: GeminiProvider, // Using Gemini Flash as standard
+    private entitlementResolver: EntitlementResolverService,
+    private communicationService: CommunicationService
   ) {}
 
-  async sendMessage(userId: string, sessionId: string | null, content: string) {
+  async sendMessage(userId: string, sessionId: string | null, content: string, mode: string = 'DEFAULT') {
+    // 1. Fetch or create session
     let session;
     if (sessionId) {
       session = await this.prisma.chatSession.findUnique({ where: { id: sessionId } });
-    }
-    
-    if (!session) {
+      if (!session) throw new Error('Session not found');
+    } else {
       session = await this.prisma.chatSession.create({
         data: { userId, title: 'New Conversation' },
       });
     }
 
-    const memory = await this.prisma.userMemoryProfile.findUnique({ where: { userId } });
-
+    // Save user message
     await this.prisma.chatMessage.create({
       data: { sessionId: session.id, role: 'user', content },
     });
 
+    const memory = await this.prisma.userMemoryProfile.findUnique({ where: { userId } });
+
     const recentMessages = await this.prisma.chatMessage.findMany({
       where: { sessionId: session.id },
       orderBy: { createdAt: 'asc' },
-      take: 20, // Keep context window reasonable
-    });
-
-    let memoryContext = "No prior memory profile available.";
-    if (memory) {
-      memoryContext = `User Context:
-Preferred Name: ${memory.preferredName || 'Unknown'}
 Goals: ${memory.goals || 'None recorded'}
 Stressors: ${memory.recurringStressors || 'None recorded'}
 Recent Summaries: ${memory.recentSummaries || 'None'}`;
@@ -91,7 +98,28 @@ Recent Summaries: ${memory.recentSummaries || 'None'}`;
     const userContentLower = content.toLowerCase();
     const hasDistressSignal = DISTRESS_KEYWORDS.some(k => userContentLower.includes(k));
     let suggestProfessional = false;
-    if (hasDistressSignal) {
+
+    // --- ENTITLEMENT LOGIC ---
+    if (!hasDistressSignal) {
+      // If NO distress, enforce limits.
+      const accessAdvanced = await this.entitlementResolver.checkFeatureAccess(userId, 'ai_chat_advanced');
+      if (accessAdvanced.allowed) {
+        await this.entitlementResolver.consumeFeature(userId, 'ai_chat_advanced');
+      } else {
+        const accessBasic = await this.entitlementResolver.checkFeatureAccess(userId, 'ai_chat_basic');
+        if (!accessBasic.allowed) {
+          throw new HttpException({
+            code: 'FEATURE_LOCKED',
+            feature: 'ai_chat_basic',
+            requiredPlan: 'UPGRADE_REQUIRED',
+            reason: accessBasic.reason
+          }, HttpStatus.FORBIDDEN);
+        }
+        await this.entitlementResolver.consumeFeature(userId, 'ai_chat_basic');
+      }
+    } else {
+      // AI ESCALATION OVERRIDE: Distress detected. Bypass limits.
+      this.logger.warn(`Emergency override for user ${userId}. Bypassing chat limits.`);
       suggestProfessional = true;
       // Update distress count in memory profile asynchronously
       this.prisma.userMemoryProfile.upsert({
@@ -99,17 +127,62 @@ Recent Summaries: ${memory.recentSummaries || 'None'}`;
         create: { userId, distressCount: 1, lastDistressAt: new Date() },
         update: { distressCount: { increment: 1 }, lastDistressAt: new Date() },
       }).catch(() => {});
+
+      // Send System Notification linking to appointment booking
+      this.communicationService.sendNotification(
+        userId,
+        'distress',
+        'We noticed you might be going through a tough time. Would you like to book a session with a licensed professional?'
+      ).catch(() => {});
+    }
+    // -------------------------
+
+    // Select system prompt based on active mode
+    const activeSystemPrompt = MODE_PROMPTS[activeMode] || MODE_PROMPTS.DEFAULT;
+
+    // Include memory context if available
+    let memoryContext = '';
+    if (memory) {
+      memoryContext = `\n\nUSER CONTEXT (Use subtly, do not explicitly mention you are reading this):
+      - Preferred Name: ${memory.preferredName || 'Unknown'}
+      - Goals: ${memory.goals || 'None recorded'}
+      - Recurring Stressors: ${memory.recurringStressors || 'None recorded'}
+      - Recent Themes: ${memory.recentSummaries || 'None recorded'}
+      `;
     }
 
-    // Trigger Memory Sync asynchronously every 15 messages
-    const messageCount = await this.prisma.chatMessage.count({ where: { sessionId: session.id } });
-    if (messageCount > 0 && messageCount % 15 === 0) {
-      this.triggerMemorySync(session.id, userId).catch(err =>
-        this.logger.error('Background Memory Sync Failed', err)
-      );
-    }
+    const messages = [
+      { role: 'system', content: activeSystemPrompt + memoryContext },
+      ...formattedHistory
+    ];
 
-    return { session, message: aiMessage, suggestProfessional };
+    try {
+      const responseText = await this.aiProvider.generateResponse(messages, false);
+      
+      const aiMessage = await this.prisma.chatMessage.create({
+        data: {
+          sessionId: session.id,
+          role: 'ai',
+          content: responseText,
+        },
+      });
+
+      // Fire and forget summarization hook if long
+      if (recentMessages.length > 0 && recentMessages.length % 15 === 0) {
+         this.triggerMemorySync(session.id, userId).catch(err => {
+           this.logger.error(`Summarization hook failed: ${err.message}`);
+         });
+      }
+
+      return {
+        session,
+        message: aiMessage,
+        suggestProfessional
+      };
+    } catch (error: any) {
+      this.logger.error(`Error generating AI response: ${error.message}`);
+      throw new Error('Failed to generate AI response');
+    }
   }
 
   /**

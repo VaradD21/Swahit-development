@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { useAuth } from '@/context/auth-context';
 import { fetchApi } from '@/lib/api';
 
@@ -24,6 +25,7 @@ export default function MoodPage() {
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [history, setHistory] = useState<any[]>([]);
+  const [timeRange, setTimeRange] = useState<7 | 30 | 90>(7);
 
   const fetchHistory = async () => {
     try {
@@ -52,7 +54,34 @@ export default function MoodPage() {
     }
   };
 
-  const formatDate = (d: string) => new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  const formatDate = (d: string) => new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+
+  // Intelligent filling for chart
+  const getChartData = () => {
+    if (!history.length) return [];
+    
+    const dataMap = new Map();
+    history.forEach((h: any) => {
+      const d = h.date || h.createdAt.split('T')[0];
+      dataMap.set(d, h.intensity);
+    });
+
+    const chartData = [];
+    const today = new Date();
+    
+    for (let i = timeRange - 1; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().split('T')[0];
+      chartData.push({
+        date: formatDate(dateStr),
+        intensity: dataMap.get(dateStr) || null, // null for smooth continuous line break or 0 if preferred. Using null to break line if missing, but user asked for "zero/null intelligently". Let's use 0 for "no mood logged" or just omit the point so the line interpolates. If we want smooth charts with missing days, we can omit `null` and recharts will skip it if `connectNulls={true}`. Or just use `null` and `connectNulls`.
+      });
+    }
+    return chartData;
+  };
+
+  const chartData = getChartData();
 
   return (
     <div className="p-6 lg:p-10 max-w-3xl mx-auto space-y-8">
@@ -112,11 +141,47 @@ export default function MoodPage() {
       </Card>
 
       {history.length > 0 && (
-        <Card className="border-teal-100 shadow-sm">
-          <CardHeader><CardTitle className="text-lg text-slate-700">Recent Check-ins</CardTitle></CardHeader>
+        <Card className="border-teal-100 shadow-sm mt-8">
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle className="text-lg text-slate-700">Mood Trends</CardTitle>
+            <div className="flex bg-slate-100 p-1 rounded-xl">
+              {[7, 30, 90].map((days) => (
+                <button
+                  key={days}
+                  onClick={() => setTimeRange(days as 7 | 30 | 90)}
+                  className={`px-3 py-1 text-xs font-medium rounded-lg transition-colors ${timeRange === days ? 'bg-white text-teal-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                >
+                  {days}d
+                </button>
+              ))}
+            </div>
+          </CardHeader>
           <CardContent>
-            <div className="space-y-3">
-              {history.slice(0, 10).map((entry: any) => {
+            <div className="h-64 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                  <XAxis dataKey="date" tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                  <YAxis domain={[0, 10]} tick={{ fontSize: 12, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                  <Tooltip 
+                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                  />
+                  <Line 
+                    type="monotone" 
+                    dataKey="intensity" 
+                    stroke="#0d9488" 
+                    strokeWidth={3}
+                    dot={{ fill: '#0d9488', strokeWidth: 2, r: 4 }}
+                    activeDot={{ r: 6 }}
+                    connectNulls={true}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="space-y-3 mt-8">
+              <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wider">Recent Logs</h3>
+              {history.slice(-10).reverse().map((entry: any) => {
                 const m = MOODS.find(x => x.value === entry.mood);
                 return (
                   <div key={entry.id} className="flex items-center gap-3 py-2 border-b border-slate-50 last:border-0">
@@ -127,7 +192,7 @@ export default function MoodPage() {
                     </div>
                     <div className="text-right">
                       <span className="text-xs text-teal-600 font-medium">{entry.intensity}/10</span>
-                      <p className="text-xs text-slate-400">{formatDate(entry.createdAt)}</p>
+                      <p className="text-xs text-slate-400">{formatDate(entry.date || entry.createdAt)}</p>
                     </div>
                   </div>
                 );

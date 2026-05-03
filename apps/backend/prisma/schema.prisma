@@ -33,8 +33,20 @@ model User {
   chatSessions   ChatSession[]
   memoryProfile  UserMemoryProfile?
   subscription   Subscription?
+  userSubscriptions UserSubscription[]
+  featureUsages  FeatureUsage[]
+  
+  // V2 Systems
+  sentMessages   Message[] @relation("SentMessages")
+  receivedMessages Message[] @relation("ReceivedMessages")
+  notifications  Notification[]
+  prescriptions  Prescription[]
+  medicineOrders MedicineOrder[]
+  journalEntries JournalEntry[]
+  habits         Habit[]
 
   @@index([email])
+  @@index([role])
 }
 
 model Subscription {
@@ -57,9 +69,11 @@ model MoodEntry {
   mood      String   // HAPPY | CALM | SAD | ANXIOUS | ANGRY | TIRED
   intensity Int      @default(5) // 1-10 scale
   notes     String?
+  date      String   // Format YYYY-MM-DD
   createdAt DateTime @default(now())
 
-  @@index([userId, createdAt])
+  @@unique([userId, date])
+  @@index([userId, date])
 }
 
 model QuestionnaireResult {
@@ -92,6 +106,7 @@ model Doctor {
 
   appointments Appointment[]
   slots        DoctorSlot[]
+  prescriptions Prescription[]
 
   @@index([specialty, isAvailable])
 }
@@ -116,6 +131,7 @@ model Appointment {
   doctor        Doctor?  @relation(fields: [doctorId], references: [id])
   patientName   String
   location      String   @default("Online")
+  sessionType   String   @default("VIDEO") // VIDEO | AUDIO | CHAT
   preferredTime String
   notes         String?
   status        String   @default("PENDING") // PENDING | CONFIRMED | CANCELLED | COMPLETED
@@ -123,7 +139,8 @@ model Appointment {
   updatedAt     DateTime @updatedAt
 
   @@index([userId, status])
-  @@index([doctorId])
+  @@index([doctorId, status])
+  @@index([status])
 }
 
 // ─── Chat & Memory System ────────────────────────────────────────────────────
@@ -176,4 +193,232 @@ model ChatSummary {
   createdAt DateTime    @default(now())
 
   @@index([sessionId])
+}
+
+// ─── Dynamic Subscription & Feature Entitlement System ───────────────────────
+
+model Plan {
+  id            String   @id @default(uuid())
+  name          String   @unique // FREE | SILVER | GOLD | PLATINUM
+  priceMonthly  Int
+  priceYearly   Int
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  features      PlanFeature[]
+  subscriptions UserSubscription[]
+
+  @@map("plans")
+}
+
+model Feature {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  description String?
+  category    String   // CORE | AI | ANALYTICS | MEDICAL | SUPPORT
+  createdAt   DateTime @default(now())
+
+  plans       PlanFeature[]
+  usages      FeatureUsage[]
+
+  @@map("features")
+}
+
+model PlanFeature {
+  id         String  @id @default(uuid())
+  planId     String
+  plan       Plan    @relation(fields: [planId], references: [id], onDelete: Cascade)
+  featureId  String
+  feature    Feature @relation(fields: [featureId], references: [id], onDelete: Cascade)
+  isEnabled  Boolean @default(true)
+  limitValue Int?
+
+  @@unique([planId, featureId])
+  @@map("plan_features")
+}
+
+model UserSubscription {
+  id                     String    @id @default(uuid())
+  userId                 String
+  user                   User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planId                 String
+  plan                   Plan      @relation(fields: [planId], references: [id])
+  status                 String    // active, canceled, past_due, trial
+  startDate              DateTime  @default(now())
+  endDate                DateTime?
+  paymentProvider        String?   // stripe, razorpay
+  externalSubscriptionId String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  @@index([userId, status])
+  @@index([planId])
+  @@index([status])
+  @@map("user_subscriptions")
+}
+
+model FeatureUsage {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  featureKey String
+  feature    Feature  @relation(fields: [featureKey], references: [key], onDelete: Cascade)
+  usageCount Int      @default(0)
+  resetAt    DateTime
+  updatedAt  DateTime @updatedAt
+
+  @@unique([userId, featureKey])
+  @@index([userId, featureKey])
+  @@map("feature_usages")
+}
+
+// ─── Payment Webhooks & Logs ─────────────────────────────────────────────────
+
+model WebhookLog {
+  id              String   @id @default(uuid())
+  provider        String   // stripe, razorpay
+  eventId         String   @unique
+  eventType       String
+  payload         String   // JSON stringified payload
+  status          String   // PROCESSED, FAILED, RETRYING
+  errorMessage    String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([provider, eventId])
+  @@index([status])
+  @@map("webhook_logs")
+}
+
+// ─── Video Consultation System ───────────────────────────────────────────────
+
+model VideoSession {
+  id            String   @id @default(uuid())
+  appointmentId String   @unique
+  appointment   Appointment @relation(fields: [appointmentId], references: [id])
+  roomName      String   @unique
+  provider      String   @default("daily")
+  status        String   @default("scheduled") // scheduled, active, ended
+  startTime     DateTime?
+  endTime       DateTime?
+  createdAt     DateTime @default(now())
+
+  @@map("video_sessions")
+}
+
+// ─── Communication System ────────────────────────────────────────────────────
+
+model Message {
+  id         String   @id @default(uuid())
+  senderId   String
+  receiverId String
+  content    String
+  type       String   @default("text") // text, system
+  createdAt  DateTime @default(now())
+
+  sender     User     @relation("SentMessages", fields: [senderId], references: [id])
+  receiver   User     @relation("ReceivedMessages", fields: [receiverId], references: [id])
+
+  @@index([senderId, receiverId])
+  @@map("messages")
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String   // appointment, payment, reminder, distress
+  message   String
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}
+
+// ─── Medicine System ─────────────────────────────────────────────────────────
+
+model Prescription {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  doctorId  String?
+  doctor    Doctor?  @relation(fields: [doctorId], references: [id])
+  fileUrl   String
+  verified  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  
+  orders    MedicineOrder[]
+
+  @@map("prescriptions")
+}
+
+model MedicineOrder {
+  id             String   @id @default(uuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  prescriptionId String
+  prescription   Prescription @relation(fields: [prescriptionId], references: [id])
+  status         String   @default("pending") // pending, confirmed, shipped, delivered
+  totalAmount    Float    @default(0.0)
+  createdAt      DateTime @default(now())
+
+  items          OrderItem[]
+
+  @@index([userId, status])
+  @@map("medicine_orders")
+}
+
+model OrderItem {
+  id             String   @id @default(uuid())
+  orderId        String
+  order          MedicineOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  medicineName   String
+  quantity       Int
+  price          Float
+
+  @@map("order_items")
+}
+
+// ─── Core Engagement Loop ────────────────────────────────────────────────────
+
+model JournalEntry {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content     String
+  summary     String?  // Generated by AI
+  emotionTags String   // Comma-separated array or JSON string
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId, createdAt])
+  @@map("journal_entries")
+}
+
+model Habit {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  category  String   // sleep, exercise, journaling, etc.
+  createdAt DateTime @default(now())
+
+  logs      HabitLog[]
+
+  @@index([userId])
+  @@map("habits")
+}
+
+model HabitLog {
+  id        String   @id @default(uuid())
+  habitId   String
+  habit     Habit    @relation(fields: [habitId], references: [id], onDelete: Cascade)
+  date      String   // YYYY-MM-DD
+  status    String   // completed, missed
+  createdAt DateTime @default(now())
+
+  @@unique([habitId, date])
+  @@map("habit_logs")
 }

@@ -6,25 +6,39 @@ import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { ChatMessage } from '@/components/dashboard/chat-message';
 import { Send, MoreHorizontal, Eraser, Leaf, Plus, Calendar, X } from 'lucide-react';
-import { useAuth } from '@/context/auth-context';
-import { fetchApi } from '@/lib/api';
-import Link from 'next/link';
-
-type Message = {
-  id: string;
-  role: 'ai' | 'user';
-  content: string;
-  timestamp: string;
-};
+import { useEntitlements } from '@/context/entitlement-context';
 
 export default function ChatbotPage() {
   const { user } = useAuth();
+  const { checkAccess, refreshEntitlements, openUpgradeModal } = useEntitlements();
+  
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [showEscalationBanner, setShowEscalationBanner] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const [mode, setMode] = useState('DEFAULT');
+
+  // Check entitlements dynamically
+  const accessAdvanced = checkAccess('ai_chat_advanced');
+  const accessBasic = checkAccess('ai_chat_basic');
+  const hasModes = checkAccess('ai_modes').enabled;
+  
+  let chatEnabled = false;
+  let remainingCount = 0;
+  let limitCount = 0;
+  
+  if (accessAdvanced.enabled) {
+    chatEnabled = accessAdvanced.limit === null || accessAdvanced.remaining! > 0;
+    remainingCount = accessAdvanced.remaining || 0;
+    limitCount = accessAdvanced.limit || 0;
+  } else if (accessBasic.enabled) {
+    chatEnabled = accessBasic.limit === null || accessBasic.remaining! > 0;
+    remainingCount = accessBasic.remaining || 0;
+    limitCount = accessBasic.limit || 0;
+  }
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -63,7 +77,10 @@ export default function ChatbotPage() {
   };
 
   const handleSend = async () => {
-    if (!inputValue.trim()) return;
+    if (!inputValue.trim() || !chatEnabled) {
+      if (!chatEnabled) openUpgradeModal();
+      return;
+    }
 
     const userMsg: Message = {
       id: Date.now().toString(),
@@ -80,7 +97,7 @@ export default function ChatbotPage() {
     try {
       const response = await fetchApi('/chatbot/message', {
         method: 'POST',
-        body: JSON.stringify({ sessionId, content: currentInput }),
+        body: JSON.stringify({ sessionId, content: currentInput, mode }),
       });
 
       if (response.session && !sessionId) setSessionId(response.session.id);
@@ -95,13 +112,20 @@ export default function ChatbotPage() {
         timestamp: new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: 'numeric', hour12: true }).format(new Date()),
       };
       setMessages(prev => [...prev, aiMsg]);
-    } catch {
-      setMessages(prev => [...prev, {
-        id: (Date.now() + 1).toString(),
-        role: 'ai',
-        content: "I'm having trouble connecting right now. Please check your connection or try again.",
-        timestamp: new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: 'numeric', hour12: true }).format(new Date()),
-      }]);
+      
+      // Refresh entitlements after each message to update limits
+      await refreshEntitlements();
+    } catch (err: any) {
+      if (err.message?.includes('FEATURE_LOCKED')) {
+        openUpgradeModal();
+      } else {
+        setMessages(prev => [...prev, {
+          id: (Date.now() + 1).toString(),
+          role: 'ai',
+          content: "I'm having trouble connecting right now. Please check your connection or try again.",
+          timestamp: new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: 'numeric', hour12: true }).format(new Date()),
+        }]);
+      }
     } finally {
       setIsTyping(false);
     }
@@ -131,18 +155,39 @@ export default function ChatbotPage() {
           </div>
           <div>
             <h1 className="text-xl font-bold text-slate-800 tracking-tight">Swahit Companion 🌿</h1>
-            <p className="text-xs text-teal-600 font-medium">Your calm space for reflection and support.</p>
+            <div className="flex items-center gap-2 mt-1">
+              <p className="text-xs text-teal-600 font-medium">Your calm space.</p>
+              {hasModes && (
+                <select 
+                  className="text-[10px] bg-teal-50 border border-teal-200 text-teal-700 rounded-full px-2 py-0.5 outline-none font-bold cursor-pointer"
+                  value={mode}
+                  onChange={(e) => setMode(e.target.value)}
+                >
+                  <option value="DEFAULT">Normal Mode</option>
+                  <option value="VENT">Vent Mode (Listen)</option>
+                  <option value="CBT">CBT Mode (Reframe)</option>
+                  <option value="MOTIVATION">Motivation Mode</option>
+                </select>
+              )}
+            </div>
           </div>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={startNewChat}
-            className="text-teal-700 hover:bg-teal-50 hover:border-teal-200">
-            <Plus className="w-4 h-4 mr-1.5" /> New
-          </Button>
-          <Button variant="outline" size="sm" onClick={handleClear}
-            className="text-slate-500 hover:text-red-600 hover:bg-red-50 hover:border-red-200">
-            <Eraser className="w-4 h-4 mr-1.5" /> Clear
-          </Button>
+        <div className="flex items-center gap-4">
+          {limitCount > 0 && (
+            <div className="text-xs font-medium px-3 py-1.5 bg-slate-100 text-slate-600 rounded-full border border-slate-200">
+              {limitCount - remainingCount} / {limitCount} messages used
+            </div>
+          )}
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={startNewChat}
+              className="text-teal-700 hover:bg-teal-50 hover:border-teal-200">
+              <Plus className="w-4 h-4 mr-1.5" /> New
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleClear}
+              className="text-slate-500 hover:text-red-600 hover:bg-red-50 hover:border-red-200">
+              <Eraser className="w-4 h-4 mr-1.5" /> Clear
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -201,9 +246,16 @@ export default function ChatbotPage() {
         </div>
 
         {/* Input */}
-        <div className="p-4 bg-white border-t border-teal-50 z-10">
-          <div className="relative flex items-center bg-slate-50 border border-teal-100 rounded-2xl p-1 focus-within:ring-2 focus-within:ring-teal-500/20 transition-all shadow-sm">
+        <div className="p-4 bg-white border-t border-teal-50 z-10 relative">
+          {!chatEnabled && (
+            <div className="absolute inset-0 bg-white/80 backdrop-blur-sm z-20 flex items-center justify-center">
+              <p className="text-sm font-semibold text-slate-700 mr-4">You have reached your chat limit.</p>
+              <Button size="sm" onClick={openUpgradeModal} className="bg-teal-600 hover:bg-teal-700 text-white">Upgrade Plan</Button>
+            </div>
+          )}
+          <div className={`relative flex items-center bg-slate-50 border border-teal-100 rounded-2xl p-1 transition-all shadow-sm ${!chatEnabled ? 'opacity-50' : 'focus-within:ring-2 focus-within:ring-teal-500/20'}`}>
             <Input
+              disabled={!chatEnabled}
               value={inputValue}
               onChange={e => setInputValue(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
@@ -212,7 +264,7 @@ export default function ChatbotPage() {
             />
             <Button
               onClick={handleSend}
-              disabled={!inputValue.trim() || isTyping}
+              disabled={!inputValue.trim() || isTyping || !chatEnabled}
               className="rounded-xl bg-teal-600 hover:bg-teal-700 text-white h-12 w-12 shrink-0 shadow-md shadow-teal-600/20"
             >
               <Send className="w-4 h-4 ml-0.5" />

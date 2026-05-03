@@ -8,5 +8,6 @@ import { PrismaModule } from '../prisma/prisma.module';
   imports: [PrismaModule],
   controllers: [ChatbotController],
   providers: [ChatbotService, GeminiProvider],
+  exports: [GeminiProvider, ChatbotService],
 })
 export class ChatbotModule {}

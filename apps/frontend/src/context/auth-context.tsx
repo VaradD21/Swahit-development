@@ -42,7 +42,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(newUser);
     localStorage.setItem('auth_token', newToken);
     localStorage.setItem('auth_user', JSON.stringify(newUser));
-    router.push('/dashboard');
+    if (newUser.role === 'DOCTOR') {
+      router.push('/dashboard/doctor');
+    } else if (newUser.role === 'ADMIN') {
+      router.push('/dashboard/admin');
+    } else {
+      router.push('/dashboard');
+    }
   };
 
   const logout = () => {

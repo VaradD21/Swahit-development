@@ -117,7 +117,8 @@ export default function DashboardHome() {
             {[
               { label: 'Talk to Swahit', sub: '💬 24/7 AI Companion', href: '/dashboard/chatbot', color: 'text-teal-600' },
               { label: 'Questionnaire', sub: '📝 Mental Wellness Check', href: '/dashboard/questionnaire', color: 'text-amber-600' },
-              { label: 'Book Appointment', sub: '📅 Schedule with a Doctor', href: '/dashboard/appointments', color: 'text-blue-600' },
+              { label: 'Find a Therapist', sub: '🩺 Browse verified professionals', href: '/dashboard/therapists', color: 'text-indigo-500' },
+              { label: 'Book Appointment', sub: '📅 Schedule a session', href: '/dashboard/appointments', color: 'text-blue-600' },
               { label: 'Premium', sub: '💎 Upgrade your plan', href: '/dashboard/premium', color: 'text-indigo-600' },
             ].map((action, i) => (
               <Link key={i} href={action.href} className="block">
