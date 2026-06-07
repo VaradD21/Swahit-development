@@ -1,5 +1,7 @@
-import { Controller, Post, Body, Headers, Req, Logger, RawBodyRequest, HttpException, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Body, Headers, Req, Logger, HttpException, HttpStatus } from '@nestjs/common';
+import type { RawBodyRequest } from '@nestjs/common';
 import { StripeService } from './stripe.service';
+import { RazorpayService } from './razorpay.service';
 import { SubscriptionLifecycleService } from '../subscriptions/subscription-lifecycle.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { Request } from 'express';
@@ -10,6 +12,7 @@ export class PaymentsWebhookController {
 
   constructor(
     private readonly stripeService: StripeService,
+    private readonly razorpayService: RazorpayService,
     private readonly subscriptionService: SubscriptionLifecycleService,
     private readonly prisma: PrismaService,
   ) {}
@@ -90,8 +93,94 @@ export class PaymentsWebhookController {
         where: { eventId: event.id },
         data: { status: 'FAILED', errorMessage: error.message },
       });
-      // Do not crash the server. Return 200 to acknowledge receipt or 500 to retry based on strategy.
-      // Returning 500 will cause Stripe to retry the webhook.
+      throw new HttpException('Webhook processing failed', HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+
+    return { received: true };
+  }
+
+  @Post('razorpay')
+  async handleRazorpayWebhook(@Headers('x-razorpay-signature') signature: string, @Req() req: RawBodyRequest<Request>) {
+    if (!signature) {
+      throw new HttpException('Signature is missing', HttpStatus.BAD_REQUEST);
+    }
+
+    const rawBodyStr = req.rawBody ? req.rawBody.toString() : '';
+    const isValid = this.razorpayService.verifyWebhookSignature(rawBodyStr, signature);
+
+    if (!isValid) {
+      this.logger.error('Invalid Razorpay signature');
+      throw new HttpException('Invalid signature', HttpStatus.BAD_REQUEST);
+    }
+
+    const body = JSON.parse(rawBodyStr);
+    const eventId = body.id;
+    const eventType = body.event;
+
+    // 1. Log the webhook immediately
+    try {
+      await this.prisma.webhookLog.create({
+        data: {
+          provider: 'razorpay',
+          eventId: eventId,
+          eventType: eventType,
+          payload: JSON.stringify(body.payload),
+          status: 'PROCESSING',
+        },
+      });
+    } catch (err) {
+      if (err.code === 'P2002') {
+        this.logger.log(`Skipping duplicate Razorpay event: ${eventId}`);
+        return { received: true };
+      }
+      this.logger.error('Failed to log Razorpay webhook', err);
+    }
+
+    // 2. Process subscription events
+    try {
+      switch (eventType) {
+        case 'subscription.charged': {
+          const subscriptionData = body.payload.subscription.entity;
+          const notes = subscriptionData.notes || {};
+          const userId = notes.userId;
+          const planId = notes.planId;
+          const subscriptionId = subscriptionData.id;
+
+          if (userId && planId && subscriptionId) {
+            await this.subscriptionService.createSubscription(
+              userId,
+              planId,
+              'razorpay',
+              subscriptionId,
+            );
+          }
+          break;
+        }
+        case 'subscription.cancelled': {
+          const subscriptionData = body.payload.subscription.entity;
+          const notes = subscriptionData.notes || {};
+          const userId = notes.userId;
+          const subscriptionId = subscriptionData.id;
+
+          if (userId && subscriptionId) {
+            await this.subscriptionService.cancelSubscription(userId, subscriptionId);
+          }
+          break;
+        }
+      }
+
+      // Mark as processed
+      await this.prisma.webhookLog.update({
+        where: { eventId: eventId },
+        data: { status: 'PROCESSED' },
+      });
+
+    } catch (error) {
+      this.logger.error(`Error processing Razorpay event ${eventId}`, error);
+      await this.prisma.webhookLog.update({
+        where: { eventId: eventId },
+        data: { status: 'FAILED', errorMessage: error.message },
+      });
       throw new HttpException('Webhook processing failed', HttpStatus.INTERNAL_SERVER_ERROR);
     }
 

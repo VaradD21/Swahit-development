@@ -7,7 +7,7 @@ export class OrderService {
 
   constructor(private prisma: PrismaService) {}
 
-  async createOrder(userId: string, prescriptionId: string, items: { name: string, quantity: number, price: number }[]) {
+  async createOrder(userId: string, prescriptionId: string, items: { productId: string, quantity: number }[]) {
     const prescription = await this.prisma.prescription.findUnique({
       where: { id: prescriptionId },
     });
@@ -20,7 +20,26 @@ export class OrderService {
       throw new HttpException('Prescription must be verified before ordering', HttpStatus.BAD_REQUEST);
     }
 
-    const totalAmount = items.reduce((sum, item) => sum + (item.quantity * item.price), 0);
+    const productIds = items.map(i => i.productId);
+    const products = await this.prisma.medicineProduct.findMany({
+      where: { id: { in: productIds }, isActive: true },
+    });
+
+    if (products.length !== items.length) {
+      throw new HttpException('One or more products are invalid or unavailable', HttpStatus.BAD_REQUEST);
+    }
+
+    let totalAmount = 0;
+    const validatedItems = items.map(item => {
+      const product = products.find(p => p.id === item.productId)!;
+      totalAmount += (item.quantity * product.price);
+      
+      return {
+        medicineName: product.name,
+        quantity: item.quantity,
+        price: product.price,
+      };
+    });
 
     return this.prisma.medicineOrder.create({
       data: {
@@ -29,11 +48,7 @@ export class OrderService {
         totalAmount,
         status: 'pending',
         items: {
-          create: items.map(item => ({
-            medicineName: item.name,
-            quantity: item.quantity,
-            price: item.price,
-          })),
+          create: validatedItems,
         },
       },
       include: { items: true },

@@ -4,10 +4,13 @@
  * Command: npx ts-node --project tsconfig.json src/prisma/seed.ts
  */
 import { PrismaClient } from '@prisma/client';
-import { PrismaLibSql } from '@prisma/adapter-libsql';
 
-const adapter = new PrismaLibSql({ url: 'file:./dev.db' });
-const prisma = new PrismaClient({ adapter } as any);
+if (!process.env.DATABASE_URL) {
+  console.error('DATABASE_URL environment variable is required');
+  process.exit(1);
+}
+
+const prisma = new PrismaClient();
 
 const doctors = [
   { name: 'Dr. Aisha Mehta', specialty: 'Therapist', bio: 'Specializes in anxiety, stress, and life transitions. Uses CBT and mindfulness-based approaches to help clients build resilience.', rating: 4.9, reviewCount: 128, yearsExp: 10, languages: 'English, Hindi', consultFee: 999 },

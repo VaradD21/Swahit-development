@@ -5,13 +5,66 @@ import { fetchApi } from '@/lib/api';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Calendar, MessageSquare, BookHeart, UserRound, ArrowRight, Clock, Sparkles, Smile, PhoneCall } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { toast } from 'sonner';
 
 export default function DashboardHome() {
   const { user } = useAuth();
+  const router = useRouter();
   const [selectedMood, setSelectedMood] = useState<string | null>(null);
+  const [moodTrend, setMoodTrend] = useState<{day: string, val: number, color: string}[]>([
+    { day: 'Mon', val: 0, color: 'bg-slate-200' },
+    { day: 'Tue', val: 0, color: 'bg-slate-200' },
+    { day: 'Wed', val: 0, color: 'bg-slate-200' },
+    { day: 'Thu', val: 0, color: 'bg-slate-200' },
+    { day: 'Fri', val: 0, color: 'bg-slate-200' },
+    { day: 'Sat', val: 0, color: 'bg-slate-200' },
+    { day: 'Sun', val: 0, color: 'bg-slate-200' },
+  ]);
+
+  useEffect(() => {
+    if (user?.role === 'DOCTOR') {
+      router.push('/provider');
+    } else if (user?.role === 'ADMIN') {
+      router.push('/dashboard/admin');
+    } else if (user) {
+      // Fetch actual mood trend
+      fetchApi('/mood').then(data => {
+        if (Array.isArray(data) && data.length > 0) {
+          // Map latest 7 moods to the chart
+          const recent = data.slice(0, 7).reverse();
+          const colors: Record<string, string> = {
+            'Happy': 'bg-blue-400',
+            'Calm': 'bg-teal-400',
+            'Sad': 'bg-indigo-400',
+            'Angry': 'bg-rose-400',
+          };
+          const mapped = recent.map((m: any) => {
+            const date = new Date(m.createdAt);
+            const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+            return {
+              day: days[date.getDay()],
+              val: m.intensity ? m.intensity * 10 : 60, // Fallback if no intensity
+              color: colors[m.mood] || 'bg-teal-400',
+            };
+          });
+          
+          // Pad to 7 if less than 7
+          const result = [...moodTrend];
+          for (let i = 0; i < mapped.length; i++) {
+            result[7 - mapped.length + i] = mapped[i];
+          }
+          setMoodTrend(result);
+        }
+      }).catch(() => {});
+    }
+  }, [user, router]);
+
+  if (user?.role === 'DOCTOR' || user?.role === 'ADMIN') {
+    return null; // Prevent flicker before redirect
+  }
 
   const handleMoodSelect = async (mood: string) => {
     setSelectedMood(mood);
@@ -89,17 +142,9 @@ export default function DashboardHome() {
           <CardContent>
             {/* Simple CSS Bar Chart representing mood values */}
             <div className="h-48 flex items-end justify-between gap-2 pt-4 border-b border-slate-100 pb-2">
-              {[
-                { day: 'Mon', val: 80, color: 'bg-blue-400' },
-                { day: 'Tue', val: 60, color: 'bg-teal-400' },
-                { day: 'Wed', val: 90, color: 'bg-emerald-400' },
-                { day: 'Thu', val: 40, color: 'bg-indigo-400' },
-                { day: 'Fri', val: 30, color: 'bg-rose-400' },
-                { day: 'Sat', val: 70, color: 'bg-teal-400' },
-                { day: 'Sun', val: 85, color: 'bg-blue-400' },
-              ].map((day, i) => (
+              {moodTrend.map((day, i) => (
                 <div key={i} className="flex flex-col items-center w-full gap-2 group cursor-pointer">
-                  <div className={`w-full rounded-t-lg ${day.color} opacity-80 group-hover:opacity-100 transition-opacity`} style={{ height: `${day.val}%` }}></div>
+                  <div className={`w-full rounded-t-lg ${day.color} opacity-80 group-hover:opacity-100 transition-opacity`} style={{ height: `${Math.max(day.val, 10)}%` }}></div>
                   <span className="text-xs font-medium text-slate-400">{day.day}</span>
                 </div>
               ))}

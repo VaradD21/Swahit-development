@@ -5,8 +5,18 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { ChatMessage } from '@/components/dashboard/chat-message';
-import { Send, MoreHorizontal, Eraser, Leaf, Plus, Calendar, X } from 'lucide-react';
+import { Send, MoreHorizontal, Eraser, Leaf, Plus, Calendar, X, History, MessageSquare } from 'lucide-react';
 import { useEntitlements } from '@/context/entitlement-context';
+import { useAuth } from '@/context/auth-context';
+import Link from 'next/link';
+import { fetchApi } from '@/lib/api';
+
+interface Message {
+  id: string;
+  role: 'user' | 'ai';
+  content: string;
+  timestamp: string;
+}
 
 export default function ChatbotPage() {
   const { user } = useAuth();
@@ -17,6 +27,8 @@ export default function ChatbotPage() {
   const [isTyping, setIsTyping] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [showEscalationBanner, setShowEscalationBanner] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [threads, setThreads] = useState<any[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const [mode, setMode] = useState('DEFAULT');
@@ -49,9 +61,10 @@ export default function ChatbotPage() {
   useEffect(() => {
     const loadThreads = async () => {
       try {
-        const threads = await fetchApi('/chatbot/threads');
-        if (threads?.length > 0) {
-          const latestThreadId = threads[0].id;
+        const data = await fetchApi('/chatbot/threads');
+        if (data?.length > 0) {
+          setThreads(data);
+          const latestThreadId = data[0].id;
           setSessionId(latestThreadId);
           loadHistory(latestThreadId);
         }
@@ -179,6 +192,10 @@ export default function ChatbotPage() {
             </div>
           )}
           <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => setShowHistory(!showHistory)}
+              className={`${showHistory ? 'bg-teal-50 text-teal-700 border-teal-200' : 'text-slate-500'}`}>
+              <History className="w-4 h-4 mr-1.5" /> History
+            </Button>
             <Button variant="outline" size="sm" onClick={startNewChat}
               className="text-teal-700 hover:bg-teal-50 hover:border-teal-200">
               <Plus className="w-4 h-4 mr-1.5" /> New
@@ -214,67 +231,104 @@ export default function ChatbotPage() {
         </div>
       )}
 
-      {/* Chat Area */}
-      <Card className="flex-1 overflow-hidden flex flex-col bg-[#fafafa] border-teal-100/50 shadow-sm rounded-3xl relative">
-        <div className="absolute inset-0 opacity-[0.025] pointer-events-none"
-          style={{ backgroundImage: 'radial-gradient(circle at 2px 2px, #0d9488 1px, transparent 0)', backgroundSize: '24px 24px' }} />
-
-        <div className="flex-1 overflow-y-auto p-5 scroll-smooth z-10">
-          {messages.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-center space-y-4 animate-in fade-in duration-700">
-              <div className="w-16 h-16 rounded-full bg-teal-50 flex items-center justify-center">
-                <Leaf className="w-8 h-8 text-teal-300" />
-              </div>
-              <h2 className="text-xl font-bold text-slate-700">Welcome to your safe space.</h2>
-              <p className="text-slate-500 max-w-sm">
-                I'm here to listen, support, and guide you without judgment.
-                How are you feeling today, {user?.name?.split(' ')[0] || 'Friend'}?
-              </p>
+      {/* Chat Area & History Panel */}
+      <div className="flex-1 flex gap-4 overflow-hidden relative">
+        
+        {/* History Sidebar */}
+        {showHistory && (
+          <Card className="w-64 flex-shrink-0 flex flex-col bg-white border-teal-100/50 shadow-sm rounded-3xl animate-in slide-in-from-left-4">
+            <div className="p-4 border-b border-slate-100 font-semibold text-slate-700 flex justify-between items-center">
+              <span>Past Sessions</span>
+              <button onClick={() => setShowHistory(false)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-4 h-4" />
+              </button>
             </div>
-          ) : (
-            <div className="space-y-4 pb-4">
-              {messages.map((msg) => <ChatMessage key={msg.id} {...msg} />)}
-              {isTyping && (
-                <div className="flex items-center gap-2 text-slate-400 py-2 px-2 animate-pulse">
-                  <MoreHorizontal className="w-4 h-4" />
-                  <span className="text-sm">Swahit is thinking...</span>
-                </div>
+            <div className="flex-1 overflow-y-auto p-2">
+              {threads.length === 0 ? (
+                <p className="text-xs text-slate-400 text-center mt-4">No previous sessions found.</p>
+              ) : (
+                threads.map(thread => (
+                  <button
+                    key={thread.id}
+                    onClick={() => { setSessionId(thread.id); loadHistory(thread.id); }}
+                    className={`w-full text-left p-3 rounded-xl mb-1 flex items-start gap-3 transition-colors ${sessionId === thread.id ? 'bg-teal-50 text-teal-800' : 'hover:bg-slate-50 text-slate-600'}`}
+                  >
+                    <MessageSquare className={`w-4 h-4 mt-0.5 flex-shrink-0 ${sessionId === thread.id ? 'text-teal-600' : 'text-slate-400'}`} />
+                    <div className="flex-1 overflow-hidden">
+                      <p className="text-sm font-medium truncate">{thread.title || 'Conversation'}</p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">
+                        {new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(new Date(thread.updatedAt))}
+                      </p>
+                    </div>
+                  </button>
+                ))
               )}
-              <div ref={messagesEndRef} />
             </div>
-          )}
-        </div>
+          </Card>
+        )}
 
-        {/* Input */}
-        <div className="p-4 bg-white border-t border-teal-50 z-10 relative">
-          {!chatEnabled && (
-            <div className="absolute inset-0 bg-white/80 backdrop-blur-sm z-20 flex items-center justify-center">
-              <p className="text-sm font-semibold text-slate-700 mr-4">You have reached your chat limit.</p>
-              <Button size="sm" onClick={openUpgradeModal} className="bg-teal-600 hover:bg-teal-700 text-white">Upgrade Plan</Button>
-            </div>
-          )}
-          <div className={`relative flex items-center bg-slate-50 border border-teal-100 rounded-2xl p-1 transition-all shadow-sm ${!chatEnabled ? 'opacity-50' : 'focus-within:ring-2 focus-within:ring-teal-500/20'}`}>
-            <Input
-              disabled={!chatEnabled}
-              value={inputValue}
-              onChange={e => setInputValue(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-              placeholder="Share your thoughts here..."
-              className="flex-1 border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 px-4 text-[15px] h-12 shadow-none"
-            />
-            <Button
-              onClick={handleSend}
-              disabled={!inputValue.trim() || isTyping || !chatEnabled}
-              className="rounded-xl bg-teal-600 hover:bg-teal-700 text-white h-12 w-12 shrink-0 shadow-md shadow-teal-600/20"
-            >
-              <Send className="w-4 h-4 ml-0.5" />
-            </Button>
+        {/* Main Chat window */}
+        <Card className="flex-1 overflow-hidden flex flex-col bg-[#fafafa] border-teal-100/50 shadow-sm rounded-3xl relative">
+          <div className="absolute inset-0 opacity-[0.025] pointer-events-none"
+            style={{ backgroundImage: 'radial-gradient(circle at 2px 2px, #0d9488 1px, transparent 0)', backgroundSize: '24px 24px' }} />
+
+          <div className="flex-1 overflow-y-auto p-5 scroll-smooth z-10">
+            {messages.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-center space-y-4 animate-in fade-in duration-700">
+                <div className="w-16 h-16 rounded-full bg-teal-50 flex items-center justify-center">
+                  <Leaf className="w-8 h-8 text-teal-300" />
+                </div>
+                <h2 className="text-xl font-bold text-slate-700">Welcome to your safe space.</h2>
+                <p className="text-slate-500 max-w-sm">
+                  I'm here to listen, support, and guide you without judgment.
+                  How are you feeling today, {user?.name?.split(' ')[0] || 'Friend'}?
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4 pb-4">
+                {messages.map((msg) => <ChatMessage key={msg.id} {...msg} />)}
+                {isTyping && (
+                  <div className="flex items-center gap-2 text-slate-400 py-2 px-2 animate-pulse">
+                    <MoreHorizontal className="w-4 h-4" />
+                    <span className="text-sm">Swahit is thinking...</span>
+                  </div>
+                )}
+                <div ref={messagesEndRef} />
+              </div>
+            )}
           </div>
-          <p className="text-center text-xs text-slate-400 mt-2">
-            Swahit AI is a supportive tool — not a therapist. In crisis, please call emergency services.
-          </p>
-        </div>
-      </Card>
+
+          {/* Input */}
+          <div className="p-4 bg-white border-t border-teal-50 z-10 relative">
+            {!chatEnabled && (
+              <div className="absolute inset-0 bg-white/80 backdrop-blur-sm z-20 flex items-center justify-center">
+                <p className="text-sm font-semibold text-slate-700 mr-4">You have reached your chat limit.</p>
+                <Button size="sm" onClick={openUpgradeModal} className="bg-teal-600 hover:bg-teal-700 text-white">Upgrade Plan</Button>
+              </div>
+            )}
+            <div className={`relative flex items-center bg-slate-50 border border-teal-100 rounded-2xl p-1 transition-all shadow-sm ${!chatEnabled ? 'opacity-50' : 'focus-within:ring-2 focus-within:ring-teal-500/20'}`}>
+              <Input
+                disabled={!chatEnabled}
+                value={inputValue}
+                onChange={e => setInputValue(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+                placeholder="Share your thoughts here..."
+                className="flex-1 border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 px-4 text-[15px] h-12 shadow-none"
+              />
+              <Button
+                onClick={handleSend}
+                disabled={!inputValue.trim() || isTyping || !chatEnabled}
+                className="rounded-xl bg-teal-600 hover:bg-teal-700 text-white h-12 w-12 shrink-0 shadow-md shadow-teal-600/20"
+              >
+                <Send className="w-4 h-4 ml-0.5" />
+              </Button>
+            </div>
+            <p className="text-center text-xs text-slate-400 mt-2">
+              Swahit AI is a supportive tool — not a therapist. In crisis, please call emergency services.
+            </p>
+          </div>
+        </Card>
+      </div>
     </div>
   );
 }

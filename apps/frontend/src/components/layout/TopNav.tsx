@@ -45,9 +45,8 @@ export function TopNav() {
       return (
         <>
           <Link href="/" className="hover:text-teal-700 transition-colors">Home</Link>
-          <Link href="/dashboard/doctor" className="hover:text-teal-700 transition-colors">Doctor Dashboard</Link>
-          <Link href="/dashboard/doctor" className="hover:text-teal-700 transition-colors">Sessions</Link>
-          <Link href="/dashboard/doctor/availability" className="hover:text-teal-700 transition-colors">Availability</Link>
+          <Link href="/provider" className="hover:text-teal-700 transition-colors">Provider Portal</Link>
+          <Link href="/provider/availability" className="hover:text-teal-700 transition-colors">Availability</Link>
         </>
       );
     }

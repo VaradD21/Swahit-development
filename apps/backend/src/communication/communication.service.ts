@@ -43,7 +43,7 @@ export class CommunicationService {
     });
   }
 
-  async getChatHistory(userId1: string, userId2: string) {
+  async getChatHistory(userId1: string, userId2: string, take: number = 50, skip: number = 0) {
     return this.prisma.message.findMany({
       where: {
         OR: [
@@ -52,6 +52,8 @@ export class CommunicationService {
         ],
       },
       orderBy: { createdAt: 'asc' },
+      take: Math.min(take, 100),
+      skip,
     });
   }
 }

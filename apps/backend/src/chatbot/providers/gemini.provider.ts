@@ -7,10 +7,18 @@ import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from '@google/ge
 export class GeminiProvider implements AIService {
   private genAI: GoogleGenerativeAI;
   private readonly logger = new Logger(GeminiProvider.name);
+  
+  private consecutiveFailures = 0;
+  private circuitOpenUntil: Date | null = null;
+  private readonly MAX_FAILURES = 5;
+  private readonly CIRCUIT_TIMEOUT_MS = 60000;
 
   constructor(private configService: ConfigService) {
     const apiKey = this.configService.get<string>('GEMINI_API_KEY');
     if (!apiKey) {
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error('GEMINI_API_KEY is required in production');
+      }
       this.logger.error('GEMINI_API_KEY is not defined in environment variables');
     }
     this.genAI = new GoogleGenerativeAI(apiKey || '');
@@ -82,13 +90,48 @@ export class GeminiProvider implements AIService {
         history.pop();
       }
 
-      const chat = model.startChat({ history });
-      const result = await chat.sendMessage(latestUserMessage);
-      return result.response.text();
+      return this.executeWithResilience(async () => {
+        const chat = model.startChat({ history });
+        const result = await chat.sendMessage(latestUserMessage);
+        return result.response.text();
+      });
     } catch (error) {
       this.logger.error('Gemini API Error', error);
       throw error;
     }
+  }
+
+  private async executeWithResilience<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.circuitOpenUntil && new Date() < this.circuitOpenUntil) {
+      throw new Error('Circuit breaker is open. AI Provider is temporarily unavailable.');
+    }
+
+    let attempt = 0;
+    const maxAttempts = 3;
+    while (attempt < maxAttempts) {
+      try {
+        const result = await operation();
+        this.consecutiveFailures = 0;
+        this.circuitOpenUntil = null;
+        return result;
+      } catch (error: any) {
+        attempt++;
+        this.logger.warn(`AI API attempt ${attempt} failed: ${error.message}`);
+        
+        if (attempt >= maxAttempts) {
+          this.consecutiveFailures++;
+          if (this.consecutiveFailures >= this.MAX_FAILURES) {
+            this.circuitOpenUntil = new Date(Date.now() + this.CIRCUIT_TIMEOUT_MS);
+            this.logger.error(`Circuit breaker opened until ${this.circuitOpenUntil.toISOString()}`);
+          }
+          throw error;
+        }
+        
+        // Exponential backoff: 2s, 4s
+        await new Promise(res => setTimeout(res, Math.pow(2, attempt) * 1000));
+      }
+    }
+    throw new Error('Unreachable');
   }
 
   async listModels(): Promise<object> {

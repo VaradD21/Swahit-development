@@ -42,8 +42,6 @@ export class HabitService {
   }
 
   async calculateStreaks(habitId: string) {
-    // This calculates streaks dynamically by scanning completed logs in descending order.
-    // In production, this might be cached or run as a cron job, but for MVP we compute on demand.
     const logs = await this.prisma.habitLog.findMany({
       where: { habitId, status: 'completed' },
       orderBy: { date: 'desc' },
@@ -51,37 +49,55 @@ export class HabitService {
 
     if (logs.length === 0) return { currentStreak: 0, longestStreak: 0 };
 
-    let currentStreak = 1;
+    // Parse dates to local Date objects to calculate day difference reliably
+    const parsedDates = logs.map(l => {
+      const parts = l.date.split('-');
+      return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+    });
+
+    const isConsecutive = (d1: Date, d2: Date): boolean => {
+      const timeDiff = Math.abs(d1.getTime() - d2.getTime());
+      const dayDiff = Math.round(timeDiff / (1000 * 60 * 60 * 24));
+      return dayDiff === 1;
+    };
+
+    // 1. Calculate longest streak
     let longestStreak = 1;
     let tempStreak = 1;
 
-    for (let i = 0; i < logs.length - 1; i++) {
-      const d1 = new Date(logs[i].date);
-      const d2 = new Date(logs[i + 1].date);
-      
-      // Calculate difference in days
-      const diffTime = Math.abs(d1.getTime() - d2.getTime());
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-      if (diffDays === 1) {
+    for (let i = 0; i < parsedDates.length - 1; i++) {
+      if (isConsecutive(parsedDates[i], parsedDates[i + 1])) {
         tempStreak++;
-        if (i === tempStreak - 2) currentStreak = tempStreak; // still on the active streak
       } else {
+        if (tempStreak > longestStreak) {
+          longestStreak = tempStreak;
+        }
         tempStreak = 1;
       }
-
-      if (tempStreak > longestStreak) {
-        longestStreak = tempStreak;
-      }
+    }
+    if (tempStreak > longestStreak) {
+      longestStreak = tempStreak;
     }
 
-    // Edge case if latest log is older than yesterday, current streak is broken (0)
-    const today = new Date();
-    const lastLog = new Date(logs[0].date);
-    const diffToToday = Math.ceil(Math.abs(today.getTime() - lastLog.getTime()) / (1000 * 60 * 60 * 24));
+    // 2. Calculate current streak (must end today or yesterday)
+    let currentStreak = 0;
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     
-    if (diffToToday > 1) {
-      currentStreak = 0;
+    const yesterdayDate = new Date();
+    yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+    const yesterdayStr = `${yesterdayDate.getFullYear()}-${String(yesterdayDate.getMonth() + 1).padStart(2, '0')}-${String(yesterdayDate.getDate()).padStart(2, '0')}`;
+
+    const lastLoggedDateStr = logs[0].date;
+    if (lastLoggedDateStr === todayStr || lastLoggedDateStr === yesterdayStr) {
+      currentStreak = 1;
+      for (let i = 0; i < parsedDates.length - 1; i++) {
+        if (isConsecutive(parsedDates[i], parsedDates[i + 1])) {
+          currentStreak++;
+        } else {
+          break;
+        }
+      }
     }
 
     return { currentStreak, longestStreak };

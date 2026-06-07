@@ -1,6 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import { fetchApi } from '@/lib/api';
 
 export interface FeatureAccess {
   enabled: boolean;
@@ -36,19 +37,11 @@ export function EntitlementProvider({ children }: { children: React.ReactNode })
   const fetchEntitlements = useCallback(async () => {
     try {
       setLoading(true);
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('auth_token');
       if (!token) return;
 
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/user/entitlements`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        setEntitlements(data);
-      } else {
-        setError('Failed to fetch entitlements');
-      }
+      const data = await fetchApi('/user/entitlements');
+      setEntitlements(data);
     } catch (err) {
       console.error(err);
       setError('Network error fetching entitlements');

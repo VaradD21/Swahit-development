@@ -11,7 +11,14 @@ export class VideoService {
     private prisma: PrismaService,
     private configService: ConfigService,
   ) {
-    this.dailyApiKey = this.configService.get<string>('DAILY_API_KEY') || 'mock_key';
+    const apiKey = this.configService.get<string>('DAILY_API_KEY');
+    if (!apiKey) {
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error('DAILY_API_KEY is required in production');
+      }
+      this.logger.warn('DAILY_API_KEY is not defined, using mock key');
+    }
+    this.dailyApiKey = apiKey || 'mock_key';
   }
 
   async createRoom(appointmentId: string) {

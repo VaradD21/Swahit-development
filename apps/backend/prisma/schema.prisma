@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider   = "prisma-client-js"
+  engineType = "library"
 }
 
 datasource db {
@@ -45,7 +46,6 @@ model User {
   journalEntries JournalEntry[]
   habits         Habit[]
 
-  @@index([email])
   @@index([role])
 }
 
@@ -137,6 +137,8 @@ model Appointment {
   status        String   @default("PENDING") // PENDING | CONFIRMED | CANCELLED | COMPLETED
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+
+  videoSession  VideoSession?
 
   @@index([userId, status])
   @@index([doctorId, status])
@@ -317,8 +319,8 @@ model Message {
   type       String   @default("text") // text, system
   createdAt  DateTime @default(now())
 
-  sender     User     @relation("SentMessages", fields: [senderId], references: [id])
-  receiver   User     @relation("ReceivedMessages", fields: [receiverId], references: [id])
+  sender     User     @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver   User     @relation("ReceivedMessages", fields: [receiverId], references: [id], onDelete: Cascade)
 
   @@index([senderId, receiverId])
   @@map("messages")
@@ -379,6 +381,19 @@ model OrderItem {
   price          Float
 
   @@map("order_items")
+}
+
+model MedicineProduct {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  price       Float
+  stock       Int      @default(100)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("medicine_products")
 }
 
 // ─── Core Engagement Loop ────────────────────────────────────────────────────

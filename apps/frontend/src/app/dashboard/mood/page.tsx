@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { useAuth } from '@/context/auth-context';
 import { fetchApi } from '@/lib/api';
+import { toast } from 'sonner';
 
 const MOODS = [
   { label: 'Happy', emoji: '😊', color: 'bg-amber-100 border-amber-300 text-amber-700', value: 'HAPPY' },
@@ -31,7 +32,9 @@ export default function MoodPage() {
     try {
       const data = await fetchApi('/mood');
       setHistory(data || []);
-    } catch {}
+    } catch (error) {
+      toast.error('Failed to load mood history');
+    }
   };
 
   useEffect(() => { fetchHistory(); }, []);
@@ -49,7 +52,10 @@ export default function MoodPage() {
       setNotes('');
       setIntensity(5);
       fetchHistory();
-    } catch {} finally {
+      toast.success('Mood logged successfully!');
+    } catch (error) {
+      toast.error('Failed to log mood. Please try again.');
+    } finally {
       setLoading(false);
     }
   };

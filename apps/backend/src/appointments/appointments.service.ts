@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -36,17 +36,33 @@ export class AppointmentsService {
     notes?: string,
     sessionType?: string,
   ) {
-    return this.prisma.appointment.create({
-      data: {
-        userId,
-        patientName,
-        location,
-        preferredTime,
-        ...(doctorId ? { doctorId } : {}),
-        ...(notes ? { notes } : {}),
-        ...(sessionType ? { sessionType } : {}),
-      },
-      include: { doctor: { select: { name: true, specialty: true } } },
+    return this.prisma.$transaction(async (tx) => {
+      if (doctorId) {
+        // Prevent double booking race conditions
+        const existing = await tx.appointment.findFirst({
+          where: {
+            doctorId,
+            preferredTime,
+            status: { not: 'CANCELLED' }
+          }
+        });
+        if (existing) {
+          throw new ForbiddenException('This time slot is already booked.');
+        }
+      }
+
+      return tx.appointment.create({
+        data: {
+          userId,
+          patientName,
+          location,
+          preferredTime,
+          ...(doctorId ? { doctorId } : {}),
+          ...(notes ? { notes } : {}),
+          ...(sessionType ? { sessionType } : {}),
+        },
+        include: { doctor: { select: { name: true, specialty: true } } },
+      });
     });
   }
 
@@ -80,8 +96,20 @@ export class AppointmentsService {
     });
   }
 
-  async getPatientDetails(userId: string) {
-    const [user, moods, journals] = await Promise.all([
+  async getPatientDetails(userId: string, doctorId?: string) {
+    if (doctorId) {
+      const appointment = await this.prisma.appointment.findFirst({
+        where: {
+          userId,
+          doctorId,
+          status: 'CONFIRMED',
+        },
+      });
+      if (!appointment) {
+        throw new ForbiddenException('Access denied: You do not have an active appointment with this patient.');
+      }
+    }
+    const [user, moods, journals, appointments, prescriptions] = await Promise.all([
       this.prisma.user.findUnique({
         where: { id: userId },
         select: { id: true, name: true, email: true, gender: true, dob: true, profession: true },
@@ -97,13 +125,50 @@ export class AppointmentsService {
         take: 5,
         select: { id: true, content: true, summary: true, emotionTags: true, createdAt: true },
       }),
+      this.prisma.appointment.findMany({
+        where: { userId, doctorId },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, notes: true, createdAt: true },
+      }),
+      this.prisma.prescription.findMany({
+        where: { userId, doctorId },
+        orderBy: { createdAt: 'desc' },
+      }),
     ]);
+
+    const clinicalNotes = appointments
+      .filter((app) => app.notes)
+      .map((app) => ({
+        id: app.id,
+        type: 'SOAP_NOTE',
+        content: app.notes,
+        createdAt: app.createdAt,
+      }));
 
     return {
       profile: user,
       moodHistory: moods,
       recentJournals: journals,
+      clinicalNotes,
+      prescriptions,
     };
+  }
+
+  async addClinicalNoteByUser(userId: string, doctorId: string, note: string) {
+    // Find the latest appointment for this user+doctor
+    const latestAppointment = await this.prisma.appointment.findFirst({
+      where: { userId, doctorId },
+      orderBy: { createdAt: 'desc' },
+    });
+    
+    if (!latestAppointment) {
+      throw new ForbiddenException('Cannot add note without an appointment.');
+    }
+
+    return this.prisma.appointment.update({
+      where: { id: latestAppointment.id },
+      data: { notes: latestAppointment.notes ? latestAppointment.notes + '\n\n---\n\n' + note : note },
+    });
   }
 
   async addClinicalNote(appointmentId: string, doctorId: string, note: string) {

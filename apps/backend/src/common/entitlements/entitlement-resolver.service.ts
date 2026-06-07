@@ -1,7 +1,7 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
-import { Cache } from 'cache-manager';
+import type { Cache } from 'cache-manager';
 
 export interface UserEntitlements {
   plan: string;
@@ -103,13 +103,15 @@ export class EntitlementResolverService {
       };
     }
 
-    // Upsert FeatureUsage
+    const entitlements = await this.resolveUserEntitlements(userId);
+    const featureAccess = entitlements.features[featureKey];
+
+    // Upsert FeatureUsage (Optimistic atomic increment)
     const now = new Date();
-    // Default reset logic: next day midnight
     const nextMidnight = new Date(now);
     nextMidnight.setHours(24, 0, 0, 0);
 
-    await this.prisma.featureUsage.upsert({
+    const updated = await this.prisma.featureUsage.upsert({
       where: { userId_featureKey: { userId, featureKey } },
       update: { usageCount: { increment: 1 } },
       create: {
@@ -119,6 +121,20 @@ export class EntitlementResolverService {
         resetAt: nextMidnight,
       },
     });
+
+    if (!featureAccess.enabled && featureAccess.limit !== null && updated.usageCount > featureAccess.limit) {
+      // Revert the optimistic increment since limit was exceeded
+      await this.prisma.featureUsage.update({
+        where: { id: updated.id },
+        data: { usageCount: { decrement: 1 } },
+      });
+      throw {
+        code: 'FEATURE_LOCKED',
+        feature: featureKey,
+        requiredPlan: access.requiredPlan || 'UPGRADE_REQUIRED',
+        reason: 'LIMIT_REACHED',
+      };
+    }
 
     // Invalidate cache
     await this.invalidateCache(userId);

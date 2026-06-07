@@ -55,7 +55,7 @@ export class ChatbotService {
     let session;
     if (sessionId) {
       session = await this.prisma.chatSession.findUnique({ where: { id: sessionId } });
-      if (!session) throw new Error('Session not found');
+      if (!session) throw new HttpException('Session not found', HttpStatus.NOT_FOUND);
     } else {
       session = await this.prisma.chatSession.create({
         data: { userId, title: 'New Conversation' },
@@ -68,31 +68,6 @@ export class ChatbotService {
     });
 
     const memory = await this.prisma.userMemoryProfile.findUnique({ where: { userId } });
-
-    const recentMessages = await this.prisma.chatMessage.findMany({
-      where: { sessionId: session.id },
-      orderBy: { createdAt: 'asc' },
-Goals: ${memory.goals || 'None recorded'}
-Stressors: ${memory.recurringStressors || 'None recorded'}
-Recent Summaries: ${memory.recentSummaries || 'None'}`;
-    }
-
-    const messagesToProvider: any[] = [
-      { role: 'system', content: `${SYSTEM_PROMPT}\n\n${memoryContext}` },
-      ...recentMessages.map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content }))
-    ];
-
-    let aiResponseContent = "I'm having trouble thinking right now, but I'm here for you.";
-    try {
-      // For premium users, we could pass true here: aiProvider.generateResponse(..., user.isPremium)
-      aiResponseContent = await this.aiProvider.generateResponse(messagesToProvider, false);
-    } catch (e) {
-      this.logger.error('Failed to generate response', e);
-    }
-
-    const aiMessage = await this.prisma.chatMessage.create({
-      data: { sessionId: session.id, role: 'ai', content: aiResponseContent },
-    });
 
     // Detect distress to suggest professional help
     const userContentLower = content.toLowerCase();
@@ -126,18 +101,23 @@ Recent Summaries: ${memory.recentSummaries || 'None'}`;
         where: { userId },
         create: { userId, distressCount: 1, lastDistressAt: new Date() },
         update: { distressCount: { increment: 1 }, lastDistressAt: new Date() },
-      }).catch(() => {});
+      }).catch((err) => {
+        this.logger.error(`Failed to update distress count for user ${userId}`, err);
+      });
 
       // Send System Notification linking to appointment booking
       this.communicationService.sendNotification(
         userId,
         'distress',
         'We noticed you might be going through a tough time. Would you like to book a session with a licensed professional?'
-      ).catch(() => {});
+      ).catch((err) => {
+        this.logger.error(`Failed to send distress notification to user ${userId}`, err);
+      });
     }
     // -------------------------
 
     // Select system prompt based on active mode
+    const activeMode = (mode || 'DEFAULT').toUpperCase();
     const activeSystemPrompt = MODE_PROMPTS[activeMode] || MODE_PROMPTS.DEFAULT;
 
     // Include memory context if available
@@ -151,9 +131,19 @@ Recent Summaries: ${memory.recentSummaries || 'None'}`;
       `;
     }
 
-    const messages = [
+    // Get recent messages for context
+    const recentMessages = await this.prisma.chatMessage.findMany({
+      where: { sessionId: session.id },
+      orderBy: { createdAt: 'asc' },
+      take: 20, // Load last 20 messages for context
+    });
+
+    const messages: { role: 'user' | 'assistant' | 'system', content: string }[] = [
       { role: 'system', content: activeSystemPrompt + memoryContext },
-      ...formattedHistory
+      ...recentMessages.map(m => ({
+        role: (m.role === 'user' ? 'user' : 'assistant') as 'user' | 'assistant', // Gemini API expects 'user' / 'model' (or 'assistant')
+        content: m.content,
+      }))
     ];
 
     try {
@@ -167,11 +157,13 @@ Recent Summaries: ${memory.recentSummaries || 'None'}`;
         },
       });
 
-      // Fire and forget summarization hook if long
+      // Await summarization hook if long
       if (recentMessages.length > 0 && recentMessages.length % 15 === 0) {
-         this.triggerMemorySync(session.id, userId).catch(err => {
+         try {
+           await this.triggerMemorySync(session.id, userId);
+         } catch (err: any) {
            this.logger.error(`Summarization hook failed: ${err.message}`);
-         });
+         }
       }
 
       return {
@@ -181,7 +173,7 @@ Recent Summaries: ${memory.recentSummaries || 'None'}`;
       };
     } catch (error: any) {
       this.logger.error(`Error generating AI response: ${error.message}`);
-      throw new Error('Failed to generate AI response');
+      throw new HttpException('Failed to generate AI response', HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
 
@@ -205,7 +197,7 @@ Recent Summaries: ${memory.recentSummaries || 'None'}`;
       const summaryContent = await this.aiProvider.generateResponse([
         { role: 'system', content: SYNC_PROMPT },
         { role: 'user', content: conversationLog }
-      ], false); // Use Flash for quick internal tasks
+      ] as { role: 'system' | 'user' | 'assistant'; content: string }[], false); // Use Flash for quick internal tasks
 
       // 1. Save to ChatSummary
       await this.prisma.chatSummary.create({
@@ -238,10 +230,12 @@ Recent Summaries: ${memory.recentSummaries || 'None'}`;
     }
   }
 
-  async getThreads(userId: string) {
+  async getThreads(userId: string, take: number = 20, skip: number = 0) {
     return this.prisma.chatSession.findMany({
       where: { userId },
       orderBy: { updatedAt: 'desc' },
+      take,
+      skip,
       select: { id: true, title: true, updatedAt: true, createdAt: true, userId: true },
     });
   }
@@ -254,9 +248,16 @@ Recent Summaries: ${memory.recentSummaries || 'None'}`;
   }
 
   async deleteThread(userId: string, sessionId: string) {
-    return this.prisma.chatSession.delete({
-      where: { id: sessionId, userId },
-    });
+    try {
+      return await this.prisma.chatSession.delete({
+        where: { id: sessionId, userId },
+      });
+    } catch (error: any) {
+      if (error.code === 'P2025') {
+        throw new HttpException('Chat session not found', HttpStatus.NOT_FOUND);
+      }
+      throw error;
+    }
   }
 
   async listAvailableModels() {

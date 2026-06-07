@@ -1,22 +1,19 @@
-import { Controller, Post, Body, UseGuards, Request, Get, Patch, Param, ForbiddenException } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, Get, Patch, Param, Query, ParseBoolPipe } from '@nestjs/common';
+import { AddTherapistDto } from './dto/add-therapist.dto';
 import { AdminService } from './admin.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
 import * as bcrypt from 'bcrypt';
 
 @Controller('admin')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('ADMIN')
 export class AdminController {
   constructor(private readonly adminService: AdminService) {}
 
-  private checkAdmin(req: any) {
-    if (req.user.role !== 'ADMIN') {
-      throw new ForbiddenException('Admin access required');
-    }
-  }
-
   @Post('therapists')
-  async addTherapist(@Request() req: any, @Body() body: any) {
-    this.checkAdmin(req);
+  async addTherapist(@Body() body: AddTherapistDto) {
     // Hash the password
     const hashedPassword = await bcrypt.hash(body.password, 10);
     return this.adminService.addTherapist({
@@ -26,58 +23,58 @@ export class AdminController {
   }
 
   @Get('therapists')
-  async getTherapists(@Request() req: any) {
-    this.checkAdmin(req);
-    return this.adminService.getTherapists();
+  async getTherapists(@Query('take') take?: string, @Query('skip') skip?: string) {
+    const limit = Math.min(take ? parseInt(take, 10) : 20, 100);
+    const offset = skip ? parseInt(skip, 10) : 0;
+    return this.adminService.getTherapists(limit, offset);
   }
 
   @Patch('therapists/:id/status')
   async toggleTherapistStatus(
-    @Request() req: any, 
     @Param('id') id: string, 
-    @Body('isAvailable') isAvailable: boolean
+    @Body('isAvailable', ParseBoolPipe) isAvailable: boolean
   ) {
-    this.checkAdmin(req);
     return this.adminService.updateTherapistStatus(id, isAvailable);
   }
 
   @Get('users')
-  async getUsers(@Request() req: any) {
-    this.checkAdmin(req);
-    return this.adminService.getUsers();
+  async getUsers(@Query('take') take?: string, @Query('skip') skip?: string) {
+    const limit = Math.min(take ? parseInt(take, 10) : 20, 100);
+    const offset = skip ? parseInt(skip, 10) : 0;
+    return this.adminService.getUsers(limit, offset);
   }
 
   @Get('appointments')
-  async getAppointments(@Request() req: any) {
-    this.checkAdmin(req);
-    return this.adminService.getAppointments();
+  async getAppointments(@Query('take') take?: string, @Query('skip') skip?: string) {
+    const limit = Math.min(take ? parseInt(take, 10) : 20, 100);
+    const offset = skip ? parseInt(skip, 10) : 0;
+    return this.adminService.getAppointments(limit, offset);
   }
 
   @Get('analytics')
-  async getAnalytics(@Request() req: any) {
-    this.checkAdmin(req);
+  async getAnalytics() {
     return this.adminService.getAnalytics();
   }
 
   @Get('medicine/prescriptions')
-  async getPrescriptions(@Request() req: any) {
-    this.checkAdmin(req);
-    return this.adminService.getPrescriptions();
+  async getPrescriptions(@Query('take') take?: string, @Query('skip') skip?: string) {
+    const limit = Math.min(take ? parseInt(take, 10) : 20, 100);
+    const offset = skip ? parseInt(skip, 10) : 0;
+    return this.adminService.getPrescriptions(limit, offset);
   }
 
   @Patch('medicine/prescriptions/:id/verify')
   async verifyPrescription(
-    @Request() req: any,
     @Param('id') id: string,
-    @Body('verified') verified: boolean,
+    @Body('verified', ParseBoolPipe) verified: boolean,
   ) {
-    this.checkAdmin(req);
     return this.adminService.verifyPrescription(id, verified);
   }
 
   @Get('medicine/orders')
-  async getMedicineOrders(@Request() req: any) {
-    this.checkAdmin(req);
-    return this.adminService.getMedicineOrders();
+  async getMedicineOrders(@Query('take') take?: string, @Query('skip') skip?: string) {
+    const limit = Math.min(take ? parseInt(take, 10) : 20, 100);
+    const offset = skip ? parseInt(skip, 10) : 0;
+    return this.adminService.getMedicineOrders(limit, offset);
   }
 }

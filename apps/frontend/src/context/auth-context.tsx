@@ -1,7 +1,8 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
+import { fetchApi } from '@/lib/api';
 
 interface User {
   id: string;
@@ -26,24 +27,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
 
-  useEffect(() => {
-    const storedToken = localStorage.getItem('auth_token');
-    const storedUser = localStorage.getItem('auth_user');
+  const pathname = usePathname();
 
-    if (storedToken && storedUser) {
-      setToken(storedToken);
-      setUser(JSON.parse(storedUser));
-    }
-    setIsLoading(false);
-  }, []);
+  useEffect(() => {
+    const checkAuth = async () => {
+      const storedToken = localStorage.getItem('auth_token');
+      const storedUser = localStorage.getItem('auth_user');
+
+      if (storedToken && storedUser) {
+        try {
+          // Verify token against backend. fetchApi handles 401s automatically.
+          await fetchApi('/auth/profile'); 
+          setToken(storedToken);
+          setUser(JSON.parse(storedUser));
+        } catch (e) {
+          // Token invalid or DB wiped. Let fetchApi handle the redirect.
+          setToken(null);
+          setUser(null);
+        }
+      } else if (pathname.startsWith('/dashboard')) {
+        router.push('/login');
+      }
+      setIsLoading(false);
+    };
+
+    checkAuth();
+  }, [pathname, router]);
 
   const login = (newToken: string, newUser: User) => {
     setToken(newToken);
     setUser(newUser);
     localStorage.setItem('auth_token', newToken);
     localStorage.setItem('auth_user', JSON.stringify(newUser));
+    
     if (newUser.role === 'DOCTOR') {
-      router.push('/dashboard/doctor');
+      router.push('/provider');
     } else if (newUser.role === 'ADMIN') {
       router.push('/dashboard/admin');
     } else {

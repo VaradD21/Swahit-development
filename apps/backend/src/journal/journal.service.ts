@@ -43,11 +43,18 @@ export class JournalService {
       const match = result.match(/\{[\s\S]*\}/);
       if (match) {
         const parsed = JSON.parse(match[0]);
+        const ALLOWED_EMOTIONS = ['happy', 'sad', 'angry', 'anxious', 'hopeful', 'exhausted', 'calm', 'stressed', 'overwhelmed', 'neutral', 'grateful', 'frustrated'];
+        const tags = Array.isArray(parsed.emotionTags)
+          ? parsed.emotionTags
+              .map((t: any) => String(t).trim().toLowerCase())
+              .filter((t: string) => ALLOWED_EMOTIONS.includes(t))
+              .join(',')
+          : '';
         await this.prisma.journalEntry.update({
           where: { id: entryId },
           data: {
             summary: parsed.summary,
-            emotionTags: Array.isArray(parsed.emotionTags) ? parsed.emotionTags.join(',') : '',
+            emotionTags: tags,
           },
         });
       }

@@ -2,18 +2,20 @@ import { Controller, Post, Get, Delete, Patch, Body, Param, Query, UseGuards, Re
 import { AppointmentsService } from './appointments.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { FeatureGuard } from '../common/guards/feature.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
 
 @Controller('appointments')
+@UseGuards(JwtAuthGuard)
 export class AppointmentsController {
   constructor(private readonly appointmentsService: AppointmentsService) {}
 
-  // Public — doctor listing for booking page
   @Get('doctors')
   async getDoctors(@Query('specialty') specialty?: string) {
     return this.appointmentsService.getDoctors(specialty);
   }
 
-  @UseGuards(JwtAuthGuard, FeatureGuard('appointment_booking'))
+  @UseGuards(FeatureGuard('appointment_booking'))
   @Post()
   async book(
     @Request() req: any,
@@ -30,29 +32,25 @@ export class AppointmentsController {
     );
   }
 
-  @UseGuards(JwtAuthGuard)
   @Get()
   async getAppointments(@Request() req: any) {
     return this.appointmentsService.getUserAppointments(req.user.userId);
   }
 
-  @UseGuards(JwtAuthGuard)
   @Delete(':id')
   async cancel(@Request() req: any, @Param('id') id: string) {
     return this.appointmentsService.cancelAppointment(req.user.userId, id);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(RolesGuard)
+  @Roles('DOCTOR')
   @Get('doctor')
   async getDoctorAppointments(@Request() req: any) {
-    // In a real app, verify role === 'DOCTOR' here
-    // For now, assume the user ID matches the doctor ID (if they are a doctor)
-    // To support this, we would ideally fetch the doctor profile linked to this user.
-    // For MVP, if we pass doctorId in query or infer it:
     return this.appointmentsService.getDoctorAppointments(req.user.userId);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(RolesGuard)
+  @Roles('DOCTOR')
   @Patch(':id/status')
   async updateStatus(
     @Request() req: any,

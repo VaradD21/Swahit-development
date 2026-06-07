@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Param, Body, Query, UseGuards, Request } from '@nestjs/common';
+import { Controller, Post, Get, Param, Body, Query, UseGuards, Request, BadRequestException } from '@nestjs/common';
 import { JournalService } from './journal.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { FeatureGuard } from '../common/guards/feature.guard';
@@ -11,7 +11,7 @@ export class JournalController {
   @Post()
   async createEntry(@Request() req: any, @Body('content') content: string) {
     if (!content || content.trim() === '') {
-      throw new Error('Content is required');
+      throw new BadRequestException('Content is required');
     }
     return this.journalService.createEntry(req.user.userId, content);
   }

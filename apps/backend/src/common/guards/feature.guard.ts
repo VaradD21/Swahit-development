@@ -1,7 +1,7 @@
-import { CanActivate, ExecutionContext, Injectable, mixin, HttpException, HttpStatus } from '@nestjs/common';
+import { CanActivate, ExecutionContext, Injectable, mixin, HttpException, HttpStatus, Type } from '@nestjs/common';
 import { EntitlementResolverService } from '../entitlements/entitlement-resolver.service';
 
-export const FeatureGuard = (featureKey: string) => {
+export const FeatureGuard = (featureKey: string): Type<CanActivate> => {
   @Injectable()
   class FeatureGuardMixin implements CanActivate {
     constructor(private readonly entitlementResolver: EntitlementResolverService) {}

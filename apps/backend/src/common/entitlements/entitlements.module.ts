@@ -6,7 +6,10 @@ import { PrismaModule } from '../../prisma/prisma.module';
 
 @Global()
 @Module({
-  imports: [PrismaModule, CacheModule.register()],
+  imports: [
+    PrismaModule, 
+    CacheModule.register()
+  ],
   controllers: [EntitlementsController],
   providers: [EntitlementResolverService],
   exports: [EntitlementResolverService],

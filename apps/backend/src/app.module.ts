@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ThrottlerModule } from '@nestjs/throttler';
+import { TerminusModule } from '@nestjs/terminus';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
@@ -26,6 +28,11 @@ import { HabitModule } from './habit/habit.module';
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     ScheduleModule.forRoot(),
+    ThrottlerModule.forRoot([{
+      ttl: 60000, // 1 minute
+      limit: 30,  // limit each IP to 30 requests per ttl
+    }]),
+    TerminusModule,
     PrismaModule,
     AuthModule,
     UsersModule,
@@ -45,6 +52,12 @@ import { HabitModule } from './habit/habit.module';
     HabitModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    {
+      provide: require('@nestjs/core').APP_GUARD,
+      useClass: require('@nestjs/throttler').ThrottlerGuard,
+    },
+  ],
 })
 export class AppModule {}

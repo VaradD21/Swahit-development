@@ -40,8 +40,10 @@ export class AdminService {
     });
   }
 
-  async getTherapists() {
+  async getTherapists(take: number = 20, skip: number = 0) {
     return this.prisma.doctor.findMany({
+      take,
+      skip,
       orderBy: { createdAt: 'desc' }
     });
   }
@@ -53,8 +55,10 @@ export class AdminService {
     });
   }
 
-  async getUsers() {
+  async getUsers(take: number = 20, skip: number = 0) {
     return this.prisma.user.findMany({
+      take,
+      skip,
       select: {
         id: true,
         email: true,
@@ -71,8 +75,10 @@ export class AdminService {
     });
   }
 
-  async getAppointments() {
+  async getAppointments(take: number = 20, skip: number = 0) {
     return this.prisma.appointment.findMany({
+      take,
+      skip,
       include: {
         user: { select: { name: true, email: true } },
         doctor: { select: { name: true, specialty: true } },
@@ -106,8 +112,10 @@ export class AdminService {
   }
 
   // Medicine System Management
-  async getPrescriptions() {
+  async getPrescriptions(take: number = 20, skip: number = 0) {
     return this.prisma.prescription.findMany({
+      take,
+      skip,
       include: {
         user: { select: { name: true, email: true } },
         doctor: { select: { name: true } },
@@ -123,8 +131,10 @@ export class AdminService {
     });
   }
 
-  async getMedicineOrders() {
+  async getMedicineOrders(take: number = 20, skip: number = 0) {
     return this.prisma.medicineOrder.findMany({
+      take,
+      skip,
       include: {
         user: { select: { name: true, email: true } },
         items: true,
